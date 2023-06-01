@@ -27,6 +27,14 @@ class Residual(nn.Module):
     def forward(self, x, *args, **kwargs):
         return self.fn(x, *args, **kwargs) + x
 
+class CustomPadding1D(layers.Layer):
+    def __init__(self, padding, padding_mode):
+        super().__init__()
+        self.padding = padding
+        self.padding_mode = padding_mode
+    def call(self, inputs):
+        return tf.pad(inputs, [[0, 0], [self.padding, self.padding], [0, 0]], mode=self.padding_mode)
+
 def Upsample(dim):
     return layers.Conv1DTranspose(dim, 4, strides=2, padding="same")
 
@@ -131,14 +139,6 @@ class LinearAttention(Attention):
 #             x = x + h
 #         return self.out_net(x)
 
-# For some reason keras doesn't have build in support for replicate/symmetric padding
-class ReplicatePadding1D(layers.Layer):
-    def __init__(self, padding):
-        super().__init__()
-        self.padding = padding
-    def call(self, inputs):
-        return tf.pad(inputs, [[0, 0], [self.padding, self.padding], [0, 0]], mode="SYMMETRIC")
-
 class GLU(layers.Layer):
     """https://github.com/Rishit-dagli/GLU/blob/main/glu_tf/glu.py"""
     def __init__(self, bias=True, dim=-1, **kwargs):
@@ -168,7 +168,7 @@ class WaveBlock(layers.Layer):
                 if up:
                     net.add(layers.ZeroPadding1D(2**i))
                 else:
-                    net.add(ReplicatePadding1D(2**i))
+                    net.add(CustomPadding1D(2**i, "SYMMETRIC"))
                 net.add((layers.Conv1DTranspose if up else layers.Conv1D)(
                     filters=2 * dim * mult,
                     kernel_size=2,
@@ -223,6 +223,36 @@ class ConvNextBlock(nn.Module):
 
         h: "N,D,L" = self.net(h)
         return h + self.res_conv(x)
+
+class ConvNextBlock(layers.Layer):
+    """https://arxiv.org/abs/2201.03545"""
+
+    def __init__(self, dim, dim_out, *, emb_dim=None, mult=2, norm=True, groups=1):
+        super().__init__()
+
+        self.mlp = (
+            tf.keras.Sequential([
+                layers.Lambda(tf.nn.silu),
+                layers.Dense(dim)
+            ])
+            if exsits(emb_dim)
+            else None
+        )
+
+        self.padding = CustomPadding1D(3, "REFLECT")
+        self.ds_conv = layers.Conv1d(dim, 7, padding="valid", groups=dim)
+
+        self.net = tf.keras.Sequential([
+            layers.GroupNormalization(1) if norm else layers.Identity(),
+            CustomPadding1D(3, "REFLECT"),
+            layers.Conv1D(dim_out * mult, 7, strides=1, padding="valid", groups=groups),
+            layers.Lambda(tf.nn.silu),
+            layers.GroupNormalization(1),
+            CustomPadding1D(3, "REFLECT"),
+            layers.Conv1D(dim_out, 7, strides=1, padding="valid", groups=groups)
+        ])
+
+        self.res_conv
     
 class UNet(nn.Module):
     def __init__(
