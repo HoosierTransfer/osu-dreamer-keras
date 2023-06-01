@@ -4,8 +4,10 @@ from functools import partial
 import torch
 import torch.nn as nn
 
-from einops import rearrange
+import tensorflow.keras
+from tensorflow.keras import layers
 
+from einops import rearrange
 
 exists = lambda x: x is not None
 
@@ -26,34 +28,37 @@ class Residual(nn.Module):
         return self.fn(x, *args, **kwargs) + x
 
 def Upsample(dim):
-    return nn.ConvTranspose1d(dim, dim, 4, 2, 1)
+    return layers.Conv1DTranspose(dim, 4, strides=2, padding="same")
 
 def Downsample(dim):
-    return nn.Conv1d(dim, dim, 4, 2, 1, padding_mode='reflect')
+    # TODO: implement relection padding
+    return layers.Conv1D(dim, 4, strides=2, padding="same")
 
-class PreNorm(nn.Module):
+class PreNorm(layers.Layer):
     def __init__(self, dim, fn):
         super().__init__()
         self.fn = fn
-        self.norm = nn.GroupNorm(1, dim)
+        # I'm not sure if the num_channels from pytorch does anything
+        self.norm = layers.GroupNormalization(1)
 
-    def forward(self, x):
-        x = self.norm(x)
+    def call(self, inputs):
+        x = self.norm(inputs)
         return self.fn(x)
 
-class SinusoidalPositionEmbeddings(nn.Module):
+class SinusoidalPositionEmbeddings(layers.Layer):
     def __init__(self, dim, max_timescale=10000):
         super().__init__()
         assert dim % 2 == 0
-        self.fs = torch.pow(max_timescale, torch.linspace(0, -1, dim // 2))
+        self.rate = tf.pow(max_timescale, tf.linspace(0, -1, dim // 2))
 
-    def forward(self, t: "N,") -> "N,T":
-        # {sin,cos}(t / max_timescale^[0..1])
-        embs = t[:, None] * self.fs.to(t.device)[None, :]
-        embs = torch.cat([embs.sin(), embs.cos()], dim=-1)
-        return embs
-    
-class Attention(nn.Module):
+    def call(self, inputs):
+        inputs = tf.expand_dims(inputs, -1)
+        fs = tf.constant(self.rate, dtype=tf.float32)
+        embs = inputs * fs
+        embs_sin_cos = tf.concat([tf.sin(embs), tf.cos(embs)], axis=-1)
+        return embs_sin_cos
+
+class Attention(layers.Layer):
     def __init__(self, dim, heads=8, dim_head=32):
         super().__init__()
         self.scale = dim_head**-0.5
@@ -61,34 +66,34 @@ class Attention(nn.Module):
         h_dim = dim_head * heads
         self.dim_head = dim_head
         
-        self.to_qkv: "N,C,L -> N,3H,L" = nn.Conv1d(dim, h_dim*3, 1, bias=False)
-        self.to_out = nn.Conv1d(h_dim, dim, 1)
+        self.to_qkv = layers.Conv1D(h_dim*3, 1, use_basis=False) # Maybe add input_shape for convolutonal layers here
+        self.to_out = layers.Conv1D(dim, 1)
 
-    def forward(self, x: "N,C,L") -> "N,C,L":
-        qkv: "3,N,h_dim,L" = self.to_qkv(x).chunk(3, dim=1)
-        out = self.attn(*( t.unflatten(1, (self.heads, -1)) for t in qkv ))
+    def call(self, inputs):
+        qkv = self.to_qkv(inputs)
+        qkv = tf.split(qkv, 3, axis=1) # Why use 1 for the axis? Everything else uses -1
+        out = self.attn(*(t for t in qkv))
         return self.to_out(out)
-        
-    def attn(self, q: "N,h,d,L", k: "N,h,d,L", v: "N,h,d,L"):
+
+    def attn(self, q, k, v):
         q = q * self.scale
+        sim = tf.einsum("b h d i, b h d j -> b h i j", q, k) # I have no idea what this is. Or the other functions that take an input like this
+        sim = sim - tf.reduce_max(sim, axis=-1, keepdims=True)
+        attn = tf.nn.softmax(sim, axis=-1)
 
-        sim: "N,h,L,L" = torch.einsum("b h d i, b h d j -> b h i j", q, k)
-        sim = sim - sim.amax(dim=-1, keepdim=True).detach()
-        attn = sim.softmax(dim=-1)
-
-        out:"N,h,L,d" = torch.einsum("b h i j, b h d j -> b h i d", attn, v)
-        out = rearrange(out, "b h l c -> b (h c) l")
+        out = tf.einsum("b h i j, b h d j -> b h i d", attn, v)
+        out = rearrange(out, "b h l c -> b (h c) l") # Not sure if this works with tensorflow
         return out
 
 class LinearAttention(Attention):
     """https://arxiv.org/abs/1812.01243"""
-    
-    def attn(self, q: "N,h,d,L", k: "N,h,d,L", v: "N,h,d,L"):
-        q = q.softmax(dim=-2) * self.scale
-        k = k.softmax(dim=-1)
 
-        ctx: "N,h,d,d" = torch.einsum("b h d n, b h e n -> b h d e", k, v)
-        out: "N,h,d,l" = torch.einsum("b h d e, b h d n -> b h e n", ctx, q)
+    def attn:
+        q = tf.nn.softmax(q, axis=-2) * self.scale
+        k = tf.nn.softmax(k, dim=-1)
+
+        ctx = tf.einsum("b h d n, b h e n -> b h d e", k, v) # Again I have no idea what this is
+        out = tf.einsum("b h d e, b h d n -> b h e n", ctx, q)
         out = rearrange(out, "b h c l -> b (h c) l")
         return out
     
