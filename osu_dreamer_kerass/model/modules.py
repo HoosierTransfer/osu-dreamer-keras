@@ -1,10 +1,6 @@
 
 from functools import partial
 
-import tensorflow as tf
-import tensorflow.keras
-from tensorflow.keras import layers
-
 import torch
 import torch.nn as nn
 
@@ -31,9 +27,6 @@ class Residual(nn.Module):
 
 def Upsample(dim):
     return nn.ConvTranspose1d(dim, dim, 4, 2, 1)
-
-def Upsample(dim):
-    return layers.Conv1DTranspose(dim, 4, strides=2, padding="same")
 
 def Downsample(dim):
     return nn.Conv1d(dim, dim, 4, 2, 1, padding_mode='reflect')
