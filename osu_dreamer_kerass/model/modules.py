@@ -131,6 +131,44 @@ class WaveBlock(nn.Module):
             x = x + h
         return self.out_net(x)
 
+# For some reason keras doesn't have build in support for replicate/symmetric padding
+class ReplicatePadding1D(layers.Layer):
+    def __init__(self, padding):
+        super().__init__()
+        self.padding = padding
+    def call(self, inputs):
+        return tf.pad(inputs, [[0, 0], [self.padding, self.padding], [0, 0]], mode="SYMMETRIC")
+
+# Gated linear unit
+class GLU(layers.Layer):
+    
+
+class WaveBlock(layers.Layer):
+    """context is acquired from num_stacks*2**stack_depth neighborhood"""
+
+    def __init__(self, dim, stack_depth, num_stacks, mult=1, h_dim_groups=1, up=False):
+        super().__init__()
+
+        self.in_net = layers.Conv1D(dim * mult, 1) # Maybe add input_shape for convolutonal layers here too
+        self.out_net = layers.Conv1D(dim, 1)
+
+        net = keras.Sequential()
+        for _ in range(num_stacks):
+            for i in range(stack_depth)
+                if up:
+                    net.add(layers.ZeroPadding1D(2**i))
+                else:
+                    net.add(ReplicatePadding1D(2**i))
+                net.add((layers.Conv1DTranspose if up else layers.Conv1D)(
+                    filters=2 * dim * mult,
+                    kernel_size=2,
+                    padding="valid",
+                    dilation_rate=2**(i+1),
+                    groups=h_dim_groups,
+                ))
+                net.add(layers.GRU())
+                
+
 class ConvNextBlock(nn.Module):
     """https://arxiv.org/abs/2201.03545"""
 
