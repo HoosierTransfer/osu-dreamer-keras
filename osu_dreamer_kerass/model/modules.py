@@ -97,39 +97,39 @@ class LinearAttention(Attention):
         out = rearrange(out, "b h c l -> b (h c) l")
         return out
     
-class WaveBlock(nn.Module):
-    """context is acquired from num_stacks*2**stack_depth neighborhood"""
+# class WaveBlock(nn.Module):
+#     """context is acquired from num_stacks*2**stack_depth neighborhood"""
     
-    def __init__(self, dim, stack_depth, num_stacks, mult=1, h_dim_groups=1, up=False):
-        super().__init__()
+#     def __init__(self, dim, stack_depth, num_stacks, mult=1, h_dim_groups=1, up=False):
+#         super().__init__()
 
-        self.in_net = nn.Conv1d(dim, dim * mult, 1)
-        self.out_net = nn.Conv1d(dim * mult, dim, 1)
+#         self.in_net = nn.Conv1d(dim, dim * mult, 1)
+#         self.out_net = nn.Conv1d(dim * mult, dim, 1)
         
-        self.nets = nn.ModuleList([
-            nn.Sequential(
-                (nn.ConvTranspose1d if up else nn.Conv1d)(
-                    in_channels=dim * mult, 
-                    out_channels=2 * dim * mult,
-                    kernel_size=2,
-                    padding=2**i,
-                    dilation=2**(i+1),
-                    groups=h_dim_groups,
-                    **({} if up else dict(padding_mode='replicate')),
-                ),
-                nn.GLU(dim=1),
-            )
-            for _ in range(num_stacks)
-            for i in range(stack_depth)
-        ])
+#         self.nets = nn.ModuleList([
+#             nn.Sequential(
+#                 (nn.ConvTranspose1d if up else nn.Conv1d)(
+#                     in_channels=dim * mult, 
+#                     out_channels=2 * dim * mult,
+#                     kernel_size=2,
+#                     padding=2**i,
+#                     dilation=2**(i+1),
+#                     groups=h_dim_groups,
+#                     **({} if up else dict(padding_mode='replicate')),
+#                 ),
+#                 nn.GLU(dim=1),
+#             )
+#             for _ in range(num_stacks)
+#             for i in range(stack_depth)
+#         ])
         
-    def forward(self, x: "N,C,L") -> "N,C,L":
-        x = self.in_net(x)
-        h = x
-        for net in self.nets:
-            h = net(h)
-            x = x + h
-        return self.out_net(x)
+#     def forward(self, x: "N,C,L") -> "N,C,L":
+#         x = self.in_net(x)
+#         h = x
+#         for net in self.nets:
+#             h = net(h)
+#             x = x + h
+#         return self.out_net(x)
 
 # For some reason keras doesn't have build in support for replicate/symmetric padding
 class ReplicatePadding1D(layers.Layer):
@@ -139,9 +139,19 @@ class ReplicatePadding1D(layers.Layer):
     def call(self, inputs):
         return tf.pad(inputs, [[0, 0], [self.padding, self.padding], [0, 0]], mode="SYMMETRIC")
 
-# Gated linear unit
 class GLU(layers.Layer):
-    
+    """https://github.com/Rishit-dagli/GLU/blob/main/glu_tf/glu.py"""
+    def __init__(self, bias=True, dim=-1, **kwargs):
+        super(GLU, self).__init__(**kwargs)
+        self.bias = bias
+        self.dim = dim
+        self.dense = layers.Dense(2, use_bias=bias)
+
+    def call(self, x):
+        out, gate = tf.split(x, num_split=2, axis=self.dim)
+        gate = tf.sigmoid(gate)
+        x = tf.multiply(out, gate)
+        return x
 
 class WaveBlock(layers.Layer):
     """context is acquired from num_stacks*2**stack_depth neighborhood"""
@@ -151,10 +161,10 @@ class WaveBlock(layers.Layer):
 
         self.in_net = layers.Conv1D(dim * mult, 1) # Maybe add input_shape for convolutonal layers here too
         self.out_net = layers.Conv1D(dim, 1)
-
-        net = keras.Sequential()
+        self.nets = []
         for _ in range(num_stacks):
             for i in range(stack_depth)
+                net = tf.keras.Sequential()
                 if up:
                     net.add(layers.ZeroPadding1D(2**i))
                 else:
@@ -166,8 +176,15 @@ class WaveBlock(layers.Layer):
                     dilation_rate=2**(i+1),
                     groups=h_dim_groups,
                 ))
-                net.add(layers.GRU())
-                
+                net.add(GLU(dim=1))
+                self.nets.append(net)
+        def call(self, inputs):
+            x = self.in_net(inputs)
+            h = x
+            for net in self.nets:
+                h = net(h)
+                x = x + h
+            return self.out_net(x)
 
 class ConvNextBlock(nn.Module):
     """https://arxiv.org/abs/2201.03545"""
