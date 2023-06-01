@@ -252,7 +252,17 @@ class ConvNextBlock(layers.Layer):
             layers.Conv1D(dim_out, 7, strides=1, padding="valid", groups=groups)
         ])
 
-        self.res_conv
+        self.res_conv = layers.Conv1D(dim_out, 1) if dim != dim_out else layers.Identity()
+
+    def call(self, inputs, time_emb=None):
+        h = self.ds_conv(inputs)
+
+        if exists(self.mlp) and exists(time_emb):
+            condition = self.mlp(time_emb)
+            h = h + tf.expand_dims(condition, -1)
+        
+        h = self.net(h)
+        return h + self.res_conv(inputs)
     
 class UNet(nn.Module):
     def __init__(
