@@ -10,6 +10,7 @@ setup(
         "osu_dreamer.osu",
         "osu_dreamer.signal",
         "osu_dreamer.tokens",
+        "osu_dreamer_keras"
     ],
     install_requires=[
         "bezier",

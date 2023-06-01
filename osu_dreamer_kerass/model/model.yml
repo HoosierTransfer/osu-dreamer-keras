@@ -1,0 +1,22 @@
+model:
+    learning_rate: .001
+    learning_rate_schedule_factor: .5
+    learning_rate_patience: 5
+
+    # model hyperparameters
+    h_dims: [128,128,128,128,128]
+    h_dim_groups: 1
+    convnext_mult: 2
+    wave_stack_depth: 5
+    wave_num_stacks: 5
+    blocks_per_depth: 2
+    attn_heads: 8
+    attn_dim: 8
+    timesteps: 500
+    
+    # number of steps to use for sampling during validation
+    sample_steps: 32
+    ddim: true
+
+    # loss function - can be one of {huber, l1, l2}
+    loss_type: "huber"
