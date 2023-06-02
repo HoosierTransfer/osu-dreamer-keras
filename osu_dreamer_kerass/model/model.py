@@ -103,21 +103,6 @@ class Model(tf.keras.Model):
 #
 
     def compute_loss(self, a, x, pad=False):
-        ts = torch.randint(0, self.schedule.timesteps, (x.size(0),), device=x.device).long()
-        
-        if pad:
-            a, _ = self.inference_pad(a)
-            x, _ = self.inference_pad(x)
-        
-        true_eps: "N,X,L" = torch.randn_like(x)
-
-        x_t: "N,X,L" = self.schedule.q_sample(x, ts, true_eps)
-        
-        pred_eps = self.net(x_t, a, ts)
-        
-        return self.loss_fn(pred_eps, true_eps).mean()
-
-    def compute_loss(self, a, x, pad=False):
         ts = tf.random.uniform(x.shape[0], minval=0, maxval=self.schedule.timesteps, dtype=tf.int64)
 
         if pad:
@@ -132,23 +117,25 @@ class Model(tf.keras.Model):
 
         return self.loss_fn(pred_eps, true_eps)
     
-
-
     def configure_optimizers(self):
-        opt = torch.optim.AdamW(self.net.parameters(), lr=self.learning_rate)
-        
+        opt = tf.keras.optimizers.AdamW(learning_rate=self.learning_rate)
+
+        lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(
+            monitor='val_loss',
+            factor=self.learning_rate_schedule_factor,
+            patience=self.learning_rate_patience,
+            verbose=1,
+            mode='auto',
+            min_delta=0.0001,
+            cooldown=0,
+            min_lr=0
+        )
+
         return dict(
             optimizer=opt,
-            lr_scheduler=dict(
-                scheduler=torch.optim.lr_scheduler.ReduceLROnPlateau(
-                    opt, 
-                    factor=self.learning_rate_schedule_factor,
-                    patience=self.learning_rate_patience,
-                ),
-                monitor="val/loss",
-            ),
+            callbacks=[lr_scheduler]
         )
-    
+
     def training_step(self, batch: Tuple["N,A,L", "N,X,L"], batch_idx):
         torch.cuda.empty_cache()
         a,x = copy.deepcopy(batch)
