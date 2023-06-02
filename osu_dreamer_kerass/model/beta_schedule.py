@@ -15,7 +15,7 @@ def extract(a, ts, x_shape):
 
 class BetaSchedule:
     def __init__(self, betas, net):
-        self.net = net
+        self._net = net
 
         self.betas = betas
         self.timesteps = len(betas)
@@ -31,6 +31,29 @@ class BetaSchedule:
 
         self.posterior_mean_x0_coef = self.betas * tf.sqrt(self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)
         self.posterior_mean_xt_coef = (1.0 - self.alphas_cumprod_prev) * tf.sqrt(self.alphas) / (1.0 - self.alphas_cumprod)
+        self.posterior_variance = self.betas * (1. - self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)
+        assert (self.posterior_variance[1:] != 0).all(), self.posterior_variance[1:]
+
+    def net(self, x, a, ts):
+        """predict the mean of the noise added to `x` at timestep `ts`"""
+        return self._net(x, a, ts)
+
+        # All code below here is not part of the keras implementation
+
+    def net(self, x,a,ts):
+        """predict the mean of the noise added to `x` at timestep `ts`"""
+        return self._net(x,a,ts)
+
+    def q_sample(self, x: "N,X,L", ts: "N,", noise=None) -> "N,X,L":
+        """sample q(x_t|x_0) using the nice property"""
+        if noise is None:
+            noise = torch.randn_like(x)
+
+        sqrt_alphas_cumprod_t = extract(self.sqrt_alphas_cumprod, ts, x.shape)
+        sqrt_one_minus_alphas_cumprod_t = extract(self.sqrt_one_minus_alphas_cumprod, ts, x.shape)
+
+        return sqrt_alphas_cumprod_t * x + sqrt_one_minus_alphas_cumprod_t * noise
+
 
 class BetaSchedule:
     def __init__(self, betas, net):
