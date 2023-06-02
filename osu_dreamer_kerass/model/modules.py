@@ -1,9 +1,6 @@
 from functools import partial
 
-import torch
-import torch.nn as nn
-
-import tensorflow.keras
+import tensorflow as tf
 from tensorflow.keras import layers
 
 import numpy as np
@@ -166,7 +163,7 @@ class ConvNextBlock(layers.Layer):
                 layers.Lambda(tf.nn.silu),
                 layers.Dense(dim)
             ])
-            if exsits(emb_dim)
+            if exists(emb_dim)
             else None
         )
 
