@@ -35,6 +35,10 @@ class CustomPadding1D(layers.Layer):
     def call(self, inputs):
         return tf.pad(inputs, [[0, 0], [self.padding, self.padding], [0, 0]], mode=self.padding_mode)
 
+def ReplicationPadding2D(x, padding=(1, 1)):
+    padding_width, padding_height = padding
+    return tf.pad(x, [[0, 0], [padding_height, padding_height], [padding_width, padding_width], [0, 0]], mode='SYMMETRIC')
+
 def Upsample(dim):
     return layers.Conv1DTranspose(dim, 4, strides=2, padding="same")
 

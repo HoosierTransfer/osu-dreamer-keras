@@ -8,6 +8,11 @@ import librosa
 import torch
 import torch.nn.functional as F
 
+import tensorflow as tf
+from tensorflow.keras import layers
+
+# Yes use matplotlib. Who wouldn't?
+
 try:
     import matplotlib.pyplot as plt
     USE_MATPLOTLIB = True
@@ -17,38 +22,36 @@ except:
 import pytorch_lightning as pl
 
 from .beta_schedule import CosineBetaSchedule, StridedBetaSchedule
-from .modules import UNet
+from .modules import UNet, ReplicationPadding2D
 
 from osu_dreamer.data import A_DIM
 from osu_dreamer.signal import X_DIM
 
 VALID_PAD = 1024
 
-class Model(pl.LightningModule):
+class Model(tf.keras.Model):
     def __init__(
         self,
-        h_dims: List[int],
-        h_dim_groups: int,
-        convnext_mult: int,
-        wave_stack_depth: int,
-        wave_num_stacks: int,
-        blocks_per_depth: int,
-        attn_heads: int,
-        attn_dim: int,
-        
-        timesteps: int,
-        sample_steps: int,
-        ddim: bool,
-    
-        loss_type: str,
-        learning_rate: float = 0.,
-        learning_rate_schedule_factor: float = 0.,
-        learning_rate_patience: int = 0,
+        h_dims,
+        h_dim_groups,
+        convnext_mult,
+        wave_stack_depth,
+        wave_num_stacks,
+        blocks_per_depth,
+        attn_heads,
+        attn_dim,
+
+        timesteps,
+        sample_steps,
+        ddim,
+
+        loss_type,
+        learning_rate=0.,
+        learning_rate_schedule_factor=0.,
+        learning_rate_patience=0
     ):
         super().__init__()
-        self.save_hyperparameters()
-        
-        # model
+
         self.net = UNet(
             A_DIM+X_DIM, X_DIM,
             h_dims, h_dim_groups,
@@ -57,43 +60,40 @@ class Model(pl.LightningModule):
             wave_num_stacks,
             blocks_per_depth,
             attn_heads,
-            attn_dim,
+            attn_dim
         )
-        
+
         self.schedule = CosineBetaSchedule(timesteps, self.net)
         self.sampling_schedule = StridedBetaSchedule(self.schedule, sample_steps, ddim, self.net)
-        
-        # training params
+
         try:
             self.loss_fn = dict(
-                l1 = F.l1_loss,
-                l2 = F.mse_loss,
-                huber = F.smooth_l1_loss,
+                l1 = tf.keras.losses.mean_absolute_error(),
+                l2 = tf.keras.losses.mean_squared_error(),
+                huber = tf.keras.losses.huber(),
             )[loss_type]
         except KeyError:
             raise NotImplementedError(loss_type)
-
+        
         self.learning_rate = learning_rate
         self.learning_rate_schedule_factor = learning_rate_schedule_factor
         self.learning_rate_patience = learning_rate_patience
         self.depth = len(h_dims)-1
-        
+
     def inference_pad(self, x):
-        x = F.pad(x, (VALID_PAD, VALID_PAD), mode='replicate')
-        pad = (1 + x.size(-1) // 2 ** self.depth) * 2 ** self.depth - x.size(-1)
-        x = F.pad(x, (0, pad), mode='replicate')
-        return x, (..., slice(VALID_PAD,-(VALID_PAD+pad)))
-        
-    def forward(self, a: "N,A,L", x: "N,X,L" = None, *, sample_steps=None, ddim=None):
-        if sample_steps is not None and ddim is not None:
+        x = ReplicationPadding2D(x, padding=(VALID_PAD, VALID_PAD))
+        pad = (1 + x.shape[-1] // 2 ** self.depth) * 2 ** self.depth - x.shape[-1]
+        x = ReplicationPadding2D(x, padding=(0, pad))
+        return x, (..., slice(VALID_PAD, -(VALID_PAD+pad)))
+    
+    def call(self, a, x=None, *, sample_steps=None, ddim=None):
+        if sample_steps is not None and ddim is nont Nome:
             sch = StridedBetaSchedule(self.schedule, sample_steps, ddim, self.net)
         else:
             sch = self.sampling_schedule
-
+        
         a, sl = self.inference_pad(a)
-        return sch.sample(a, x)[sl]
-    
-    
+        return sch.sample(a, x)[sl]     
 #
 #
 # =============================================================================
@@ -116,6 +116,23 @@ class Model(pl.LightningModule):
         pred_eps = self.net(x_t, a, ts)
         
         return self.loss_fn(pred_eps, true_eps).mean()
+
+    def compute_loss(self, a, x, pad=False):
+        ts = tf.random.uniform(x.shape[0], minval=0, maxval=self.schedule.timesteps, dtype=tf.int64)
+
+        if pad:
+            a, _ = self.inference_pad(a)
+            x, _ = self.inference_pad(x)
+        
+        true_eps = tf.random.uniform(x.shape)
+
+        x_t = self.schedule.q_sample(x, ts, true_eps)
+
+        pred_eps = self.net(x_t, a, ts)
+
+        return self.loss_fn(pred_eps, true_eps)
+    
+
 
     def configure_optimizers(self):
         opt = torch.optim.AdamW(self.net.parameters(), lr=self.learning_rate)
