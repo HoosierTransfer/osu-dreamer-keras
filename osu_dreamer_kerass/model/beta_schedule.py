@@ -119,6 +119,19 @@ class CosineBetaSchedule(BetaSchedule):
         betas = tf.clip(betas, 0.0001, 0.9999)
 
         super().__init__(betas, net)
+
+class StridedBetaSchedule(BetaSchedule):
+    def __init__(self, schedule, steps, ddim, *args, **kwargs):
+        use_timesteps = set(range(0, schedule.timesteps, int(schedule.timesteps/steps)+1))
+        self.ts_map = []
+        self.ddim = ddim
+
+        last_alpha_cumprod = 1.0
+        new_betas = []
+
+        for i, alpha_cumprod in enumerate(schedule.alphas_cumprod):
+            if i in use_timesteps:
+                self.ts_map.append(i)
     
 class StridedBetaSchedule(BetaSchedule):
     def __init__(self, schedule, steps, ddim, *args, **kwargs):
