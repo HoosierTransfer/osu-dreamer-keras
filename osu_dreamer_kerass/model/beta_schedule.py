@@ -37,22 +37,18 @@ class BetaSchedule:
     def net(self, x, a, ts):
         """predict the mean of the noise added to `x` at timestep `ts`"""
         return self._net(x, a, ts)
-
-        # All code below here is not part of the keras implementation
-
-    def net(self, x,a,ts):
-        """predict the mean of the noise added to `x` at timestep `ts`"""
-        return self._net(x,a,ts)
-
-    def q_sample(self, x: "N,X,L", ts: "N,", noise=None) -> "N,X,L":
+    
+    def q_sample(self, x, ts, noise=None):
         """sample q(x_t|x_0) using the nice property"""
         if noise is None:
-            noise = torch.randn_like(x)
-
-        sqrt_alphas_cumprod_t = extract(self.sqrt_alphas_cumprod, ts, x.shape)
-        sqrt_one_minus_alphas_cumprod_t = extract(self.sqrt_one_minus_alphas_cumprod, ts, x.shape)
+            noise = tf.random.uniform(tf.shape(x))
+        
+        sqrt_alphas_cumprod_t = extract(self.sqrt_alphas_cumprod, ts, tf.shape(x))
+        sqrt_one_minus_alphas_cumprod_t = extract(self.sqrt_one_minus_alphas_cumprod, ts, tf.shape(x))
 
         return sqrt_alphas_cumprod_t * x + sqrt_one_minus_alphas_cumprod_t * noise
+
+        # All code below here is not part of the keras implementation
 
 
 class BetaSchedule:
