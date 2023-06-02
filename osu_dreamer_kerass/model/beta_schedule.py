@@ -104,7 +104,6 @@ class BetaSchedule:
             
         return x
 
-    # All code below here is not part of the keras implementation
 class CosineBetaSchedule(BetaSchedule):
     def __init__(self, timesteps, net, s=0.008):
         """
@@ -132,27 +131,19 @@ class StridedBetaSchedule(BetaSchedule):
         for i, alpha_cumprod in enumerate(schedule.alphas_cumprod):
             if i in use_timesteps:
                 self.ts_map.append(i)
-    
-class StridedBetaSchedule(BetaSchedule):
-    def __init__(self, schedule, steps, ddim, *args, **kwargs):
-        use_timesteps = set(range(0, schedule.timesteps, int(schedule.timesteps/steps)+1))
-        self.ts_map = []
-        self.ddim = ddim
-
-        last_alpha_cumprod = 1.0
-        new_betas = []
-        for i, alpha_cumprod in enumerate(schedule.alphas_cumprod):
-            if i in use_timesteps:
-                self.ts_map.append(i)
                 new_betas.append(1 - alpha_cumprod / last_alpha_cumprod)
                 last_alpha_cumprod = alpha_cumprod
-                
-        super().__init__(torch.tensor(new_betas), *args, **kwargs)
-                
-            
-    def net(self, x,a,ts):
-        ts = torch.tensor(self.ts_map, device=ts.device, dtype=ts.dtype)[ts]
-        return super().net(x,a,ts)
+        
+        super().__init__(tf.constant(new_betas), *args, *kwargs) # i think constant just creates a tensor
+
+    def net(self, x, a, ts):
+        ts = tf.constant(self.ts_map, dtype=ts.dtype)[ts]
+        return super().net(x, a, ts)
+    
+    def p_eps_mean_var(self, x, a, ts):
+        model_eps, model_mean, model_var, model_x0 = super().p_eps_mean_var(x, a, ts)
+
+    # All code below here is not part of the keras implementation
         
     def p_eps_mean_var(self, x, a, ts):
         model_eps, model_mean, model_var, model_x0 = super().p_eps_mean_var(x,a,ts)
