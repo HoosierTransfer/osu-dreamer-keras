@@ -3,13 +3,35 @@ from tqdm import tqdm
 import torch
 import torch.nn.functional as F
 
+import tensorflow as tf
+from tensorflow.keras import layers
+
 from osu_dreamer.signal import X_DIM
 
 def extract(a, ts, x_shape):
-    batch_size = ts.shape[0]
-    out = a.gather(-1, ts.cpu())
-    return out.reshape(batch_size, *((1,) * (len(x_shape) - 1))).to(ts.device)
-    
+    batch_size = tf.shape(a)[0]
+    out = tf.gather(a, tf.cast(ts, tf.int32), axis=-1)
+    return tf.reshape(out, (batch_size, *((1,) * (len(x_shape) - 1))))
+
+class BetaSchedule:
+    def __init__(self, betas, net):
+        self.net = net
+
+        self.betas = betas
+        self.timesteps = len(betas)
+
+        self.alphas = 1. - len(betas)
+        self.alphas_cumprod = tf.cumprod(self.alphas, axis=0) # why is it called cumprod 💀
+        self.alphas_cumprod_prev = tf.pad(self.alphas_cumprod[:-1], [[1, 0]], constant_values=1.0)
+        self.sqrt_recip_alphas_cumprod = tf.rsqrt(self.alphas_cumprod)
+        self.sqrt_recipm1_alphas_cumprod = tf.sqrt(1.0 / self.alphas_cumprod - 1)
+
+        self.sqrt_alphas_cumprod = tf.sqrt(self.alphas_cumprod)
+        self.sqrt_one_minus_alphas_cumprod = tf.sqrt(1.- self.alphas_cumprod)
+
+        self.posterior_mean_x0_coef = self.betas * tf.sqrt(self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)
+        self.posterior_mean_xt_coef = (1.0 - self.alphas_cumprod_prev) * tf.sqrt(self.alphas) / (1.0 - self.alphas_cumprod)
+
 class BetaSchedule:
     def __init__(self, betas, net):
         self._net = net
