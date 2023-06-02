@@ -11,8 +11,6 @@ import torch.nn.functional as F
 import tensorflow as tf
 from tensorflow.keras import layers
 
-# Yes use matplotlib. Who wouldn't?
-
 try:
     import matplotlib.pyplot as plt
     USE_MATPLOTLIB = True
@@ -87,7 +85,7 @@ class Model(tf.keras.Model):
         return x, (..., slice(VALID_PAD, -(VALID_PAD+pad)))
     
     def call(self, a, x=None, *, sample_steps=None, ddim=None):
-        if sample_steps is not None and ddim is nont Nome:
+        if sample_steps is not None and ddim is not None:
             sch = StridedBetaSchedule(self.schedule, sample_steps, ddim, self.net)
         else:
             sch = self.sampling_schedule
@@ -136,72 +134,72 @@ class Model(tf.keras.Model):
             callbacks=[lr_scheduler]
         )
 
-    def training_step(self, batch: Tuple["N,A,L", "N,X,L"], batch_idx):
-        torch.cuda.empty_cache()
-        a,x = copy.deepcopy(batch)
+    # def training_step(self, batch: Tuple["N,A,L", "N,X,L"], batch_idx):
+    #     torch.cuda.empty_cache()
+    #     a,x = copy.deepcopy(batch)
         
-        loss = self.compute_loss(a,x)
+    #     loss = self.compute_loss(a,x)
         
-        self.log(
-            "train/loss", loss.detach(),
-            logger=True, on_step=True, on_epoch=False,
-        )
+    #     self.log(
+    #         "train/loss", loss.detach(),
+    #         logger=True, on_step=True, on_epoch=False,
+    #     )
         
-        return loss
+    #     return loss
 
-    def validation_step(self, batch: Tuple["1,A,L","1,X,L"], batch_idx, *args, **kwargs):
-        torch.cuda.empty_cache()
-        a,x = copy.deepcopy(batch)
+    # def validation_step(self, batch: Tuple["1,A,L","1,X,L"], batch_idx, *args, **kwargs):
+    #     torch.cuda.empty_cache()
+    #     a,x = copy.deepcopy(batch)
         
-        loss = self.compute_loss(a,x, pad=True)
+    #     loss = self.compute_loss(a,x, pad=True)
         
-        self.log(
-            "val/loss", loss.detach(),
-            logger=True, on_step=False, on_epoch=True,
-        )
+    #     self.log(
+    #         "val/loss", loss.detach(),
+    #         logger=True, on_step=False, on_epoch=True,
+    #     )
         
-        return a,x
+    #     return a,x
         
-    def validation_epoch_end(self, val_outs: "List[(1,A,L),(1,X,L)]"):
-        if not USE_MATPLOTLIB or len(val_outs) == 0:
-            return
+    # def validation_epoch_end(self, val_outs: "List[(1,A,L),(1,X,L)]"):
+    #     if not USE_MATPLOTLIB or len(val_outs) == 0:
+    #         return
         
-        torch.cuda.empty_cache()
-        a,x = copy.deepcopy(val_outs[0])
+    #     torch.cuda.empty_cache()
+    #     a,x = copy.deepcopy(val_outs[0])
         
-        samples = self(a.repeat(2,1,1)).cpu().numpy()
+    #     samples = self(a.repeat(2,1,1)).cpu().numpy()
         
-        a: "A,L" = a.squeeze(0).cpu().numpy()
-        x: "X,L" = x.squeeze(0).cpu().numpy()
+    #     a: "A,L" = a.squeeze(0).cpu().numpy()
+    #     x: "X,L" = x.squeeze(0).cpu().numpy()
         
-        height_ratios = [1.5] + [1] * (1+len(samples))
-        w, h = a.shape[-1]/150, sum(height_ratios)/2
-        margin, margin_left = .1, .5
+    #     height_ratios = [1.5] + [1] * (1+len(samples))
+    #     w, h = a.shape[-1]/150, sum(height_ratios)/2
+    #     margin, margin_left = .1, .5
         
-        fig, (ax1, *axs) = plt.subplots(
-            len(height_ratios), 1,
-            figsize=(w, h),
-            sharex=True,
-            gridspec_kw=dict(
-                height_ratios=height_ratios,
-                hspace=.1,
-                left=margin_left/w,
-                right=1-margin/w,
-                top=1-margin/h,
-                bottom=margin/h,
-            )
-        )
+    #     fig, (ax1, *axs) = plt.subplots(
+    #         len(height_ratios), 1,
+    #         figsize=(w, h),
+    #         sharex=True,
+    #         gridspec_kw=dict(
+    #             height_ratios=height_ratios,
+    #             hspace=.1,
+    #             left=margin_left/w,
+    #             right=1-margin/w,
+    #             top=1-margin/h,
+    #             bottom=margin/h,
+    #         )
+    #     )
         
-        ax1.imshow(librosa.power_to_db(a), origin="lower", aspect='auto')
+    #     ax1.imshow(librosa.power_to_db(a), origin="lower", aspect='auto')
         
-        for sample, ax in zip((x, *samples), axs):
-            mu = np.mean(sample)
-            sig = np.std(sample)
+    #     for sample, ax in zip((x, *samples), axs):
+    #         mu = np.mean(sample)
+    #         sig = np.std(sample)
 
-            ax.set_ylim((mu-3*sig, mu+3*sig))
+    #         ax.set_ylim((mu-3*sig, mu+3*sig))
             
-            for v in sample:
-                ax.plot(v)
+    #         for v in sample:
+    #             ax.plot(v)
 
-        self.logger.experiment.add_figure("samples", fig, global_step=self.global_step)
-        plt.close(fig)
+    #     self.logger.experiment.add_figure("samples", fig, global_step=self.global_step)
+    #     plt.close(fig)
