@@ -143,18 +143,15 @@ class StridedBetaSchedule(BetaSchedule):
     def p_eps_mean_var(self, x, a, ts):
         model_eps, model_mean, model_var, model_x0 = super().p_eps_mean_var(x, a, ts)
 
-    # All code below here is not part of the keras implementation
-        
-    def p_eps_mean_var(self, x, a, ts):
-        model_eps, model_mean, model_var, model_x0 = super().p_eps_mean_var(x,a,ts)
-
         if self.ddim:
             eta = 0 # TODO: configuration
             alpha_cumprod_prev_t = extract(self.alphas_cumprod_prev, ts, x.shape)
-            model_var = eta ** 2 * model_var
+            model_var - eta ** 2 * model_var
             model_mean = (
-                model_x0 * torch.sqrt(alpha_cumprod_prev_t)
-                + model_eps * torch.sqrt(1 - alpha_cumprod_prev_t - model_var)
+                movel_x0 * tf.sqrt(alpha_cumprod_prev_t)
+                + model_eps * tf.sqrt(1 - alpha_cumprod_prev_t - model_var)
             )
 
         return model_eps, model_mean, model_var, model_x0
+    
+    # All code below here is not part of the keras implementation... if there was any
