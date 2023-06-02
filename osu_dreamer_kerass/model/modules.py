@@ -99,7 +99,7 @@ class Attention(layers.Layer):
 class LinearAttention(Attention):
     """https://arxiv.org/abs/1812.01243"""
 
-    def attn:
+    def attn(self, q, k, v):
         q = tf.nn.softmax(q, axis=-2) * self.scale
         k = tf.nn.softmax(k, dim=-1)
 
@@ -107,40 +107,6 @@ class LinearAttention(Attention):
         out = tf.einsum("b h d e, b h d n -> b h e n", ctx, q)
         out = rearrange(out, "b h c l -> b (h c) l")
         return out
-    
-# class WaveBlock(nn.Module):
-#     """context is acquired from num_stacks*2**stack_depth neighborhood"""
-    
-#     def __init__(self, dim, stack_depth, num_stacks, mult=1, h_dim_groups=1, up=False):
-#         super().__init__()
-
-#         self.in_net = nn.Conv1d(dim, dim * mult, 1)
-#         self.out_net = nn.Conv1d(dim * mult, dim, 1)
-        
-#         self.nets = nn.ModuleList([
-#             nn.Sequential(
-#                 (nn.ConvTranspose1d if up else nn.Conv1d)(
-#                     in_channels=dim * mult, 
-#                     out_channels=2 * dim * mult,
-#                     kernel_size=2,
-#                     padding=2**i,
-#                     dilation=2**(i+1),
-#                     groups=h_dim_groups,
-#                     **({} if up else dict(padding_mode='replicate')),
-#                 ),
-#                 nn.GLU(dim=1),
-#             )
-#             for _ in range(num_stacks)
-#             for i in range(stack_depth)
-#         ])
-        
-#     def forward(self, x: "N,C,L") -> "N,C,L":
-#         x = self.in_net(x)
-#         h = x
-#         for net in self.nets:
-#             h = net(h)
-#             x = x + h
-#         return self.out_net(x)
 
 class GLU(layers.Layer):
     """https://github.com/Rishit-dagli/GLU/blob/main/glu_tf/glu.py"""
@@ -166,7 +132,7 @@ class WaveBlock(layers.Layer):
         self.out_net = layers.Conv1D(dim, 1)
         self.nets = []
         for _ in range(num_stacks):
-            for i in range(stack_depth)
+            for i in range(stack_depth):
                 net = tf.keras.Sequential()
                 if up:
                     net.add(layers.ZeroPadding1D(2**i))
@@ -188,44 +154,6 @@ class WaveBlock(layers.Layer):
                 h = net(h)
                 x = x + h
             return self.out_net(x)
-
-# class ConvNextBlock(nn.Module):
-#     """https://arxiv.org/abs/2201.03545"""
-
-#     def __init__(self, dim, dim_out, *, emb_dim=None, mult=2, norm=True, groups=1):
-#         super().__init__()
-        
-#         self.mlp = (
-#             nn.Sequential(
-#                 nn.SiLU(),
-#                 nn.Linear(emb_dim, dim),
-#             )
-#             if exists(emb_dim)
-#             else None
-#         )
-
-#         self.ds_conv = nn.Conv1d(dim, dim, 7, padding=3, groups=dim, padding_mode='reflect')
-
-#         self.net = nn.Sequential(
-#             nn.GroupNorm(1, dim) if norm else nn.Identity(),
-#             nn.Conv1d(dim, dim_out * mult, 7,1,3, padding_mode='reflect', groups=groups),
-#             nn.SiLU(),
-
-#             nn.GroupNorm(1, dim_out * mult),
-#             nn.Conv1d(dim_out * mult, dim_out, 7,1,3, padding_mode='reflect', groups=groups),
-#         )
-
-#         self.res_conv = nn.Conv1d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
-
-#     def forward(self, x: "N,C,L", time_emb: "N,T" = None) -> "N,D,L":
-#         h: "N,C,L" = self.ds_conv(x)
-
-#         if exists(self.mlp) and exists(time_emb):
-#             condition: "N,C" = self.mlp(time_emb)
-#             h = h + condition.unsqueeze(-1)
-
-#         h: "N,D,L" = self.net(h)
-#         return h + self.res_conv(x)
 
 class ConvNextBlock(layers.Layer):
     """https://arxiv.org/abs/2201.03545"""
@@ -355,7 +283,7 @@ class UNet(layers.Layer):
         emb = self.time_mlp(ts)
 
         for blocks, attns, downsample in self.downs:
-            for block attn, in zip(blocks, attns):
+            for block, attn, in zip(blocks, attns):
                 x = attn(block(x, emb))
             h.append(x)
             x = downsample(x)
