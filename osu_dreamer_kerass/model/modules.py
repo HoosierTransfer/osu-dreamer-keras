@@ -344,105 +344,32 @@ class UNet(layers.Layer):
             ),
             zero_module(layers.Conv1D(h_dims[0], out_dim, 1))
         ])
-
-        # All code below here is not part of the keras implementation
-
     
-class UNet(nn.Module):
-    def __init__(self,in_dim,out_dim,h_dims,h_dim_groups,convnext_mult,wave_stack_depth,wave_num_stacks,blocks_per_depth,attn_heads,attn_dim):
-        super().__init__()
-        
-        block = partial(ConvNextBlock, mult=convnext_mult, groups=h_dim_groups)
+    def call(self, inputs, a, ts):
+        x = tf.concat([inputs, a], axis=1)
 
-        in_out = list(zip(h_dims[:-1], h_dims[1:]))
-        num_layers = len(in_out)
-        
-        self.init_conv = nn.Sequential(
-            nn.Conv1d(in_dim, h_dims[0], 7, padding=3),
-            WaveBlock(h_dims[0], wave_stack_depth, wave_num_stacks),
-        )
-        
-        # time embeddings
-        emb_dim = h_dims[0] * 4
-        self.time_mlp: "N, -> N,T" = nn.Sequential(
-            SinusoidalPositionEmbeddings(h_dims[0]),
-            nn.Linear(h_dims[0], emb_dim),
-            nn.SiLU(),
-            nn.Linear(emb_dim, emb_dim),
-        )
-
-        # layers
-        
-        self.downs = nn.ModuleList([
-            nn.ModuleList([
-                nn.ModuleList([
-                    block(dim_in if i==0 else dim_out, dim_out, emb_dim=emb_dim)
-                    for i in range(blocks_per_depth)
-                ]),
-                nn.ModuleList([
-                    Residual(PreNorm(dim_out, LinearAttention(dim_out, heads=attn_heads, dim_head=attn_dim)))
-                    for _ in range(blocks_per_depth)
-                ]),
-                Downsample(dim_out) if ind < (num_layers - 1) else nn.Identity(),
-            ])
-            for ind, (dim_in, dim_out) in enumerate(in_out)
-        ])
-
-        mid_dim = h_dims[-1]
-        self.mid_block1 = block(mid_dim, mid_dim, emb_dim=emb_dim)
-        self.mid_attn = Residual(PreNorm(mid_dim, Attention(mid_dim, heads=attn_heads, dim_head=attn_dim)))
-        self.mid_block2 = block(mid_dim, mid_dim, emb_dim=emb_dim)
-        
-        self.ups = nn.ModuleList([
-            nn.ModuleList([
-                nn.ModuleList([
-                    block(dim_out * 2 if i==0 else dim_in, dim_in, emb_dim=emb_dim)
-                    for i in range(blocks_per_depth)
-                ]),
-                nn.ModuleList([
-                    Residual(PreNorm(dim_in, LinearAttention(dim_in, heads=attn_heads, dim_head=attn_dim)))
-                    for _ in range(blocks_per_depth)
-                ]),
-                Upsample(dim_in) if ind < (num_layers - 1) else nn.Identity(),
-            ])
-            for ind, (dim_in, dim_out) in enumerate(in_out[::-1])
-        ])
-
-        self.final_conv = nn.Sequential(
-            *(
-                block(h_dims[0], h_dims[0])
-                for _ in range(blocks_per_depth)
-            ),
-            zero_module(nn.Conv1d(h_dims[0], out_dim, 1)),
-        )
-        
-
-    def forward(self, x: "N,X,L", a: "N,A,L", ts: "N,") -> "N,X,L":
-        
-        x: "N,X+A,L" = torch.cat([x,a], dim=1)
-        
-        x: "N,h_dim,L" = self.init_conv(x)
+        x = self.init_conv(x)
 
         h = []
-        emb: "N,T" = self.time_mlp(ts)
 
-        # downsample
+        emb = self.time_mlp(ts)
+
         for blocks, attns, downsample in self.downs:
-            for block, attn in zip(blocks, attns):
+            for block attn, in zip(blocks, attns):
                 x = attn(block(x, emb))
             h.append(x)
             x = downsample(x)
 
-        # bottleneck
         x = self.mid_block1(x, emb)
         x = self.mid_attn(x)
         x = self.mid_block2(x, emb)
 
-        # upsample
         for blocks, attns, upsample in self.ups:
-            x = torch.cat((x, h.pop()), dim=1)
+            x = tf.concat((x, h.pop()), dim=1)
             for block, attn in zip(blocks, attns):
                 x = attn(block(x, emb))
             x = upsample(x)
-
+        
         return self.final_conv(x)
+
+        # All code below here is not part of the keras implementation... if there was any
