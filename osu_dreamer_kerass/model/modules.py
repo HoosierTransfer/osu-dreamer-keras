@@ -1,4 +1,3 @@
-
 from functools import partial
 
 import torch
@@ -7,25 +6,29 @@ import torch.nn as nn
 import tensorflow.keras
 from tensorflow.keras import layers
 
+import numpy as np
+
 from einops import rearrange
 
 exists = lambda x: x is not None
 
 def zero_module(module):
     """
-    Zero out the parameters of a module and return it.
+    Zero out the parameters of a Keras layer and return it.
     """
-    for p in module.parameters():
-        p.detach().zero_()
+    for layer in module.layers:
+        weights = layer.get_weights()
+        zeroed_weights = [np.zeros_like(w) for w in weights]
+        layer.set_weights(zeroed_weights)
     return module
 
-class Residual(nn.Module):
+class Residual(layers.Layer):
     def __init__(self, fn):
         super().__init__()
         self.fn = fn
-
-    def forward(self, x, *args, **kwargs):
-        return self.fn(x, *args, **kwargs) + x
+    
+    def call(self, inputs, *args, **kwargs):
+        return self.fn(inputs, *args, **kwargs) + inputs
 
 class CustomPadding1D(layers.Layer):
     def __init__(self, padding, padding_mode):
@@ -186,43 +189,43 @@ class WaveBlock(layers.Layer):
                 x = x + h
             return self.out_net(x)
 
-class ConvNextBlock(nn.Module):
-    """https://arxiv.org/abs/2201.03545"""
+# class ConvNextBlock(nn.Module):
+#     """https://arxiv.org/abs/2201.03545"""
 
-    def __init__(self, dim, dim_out, *, emb_dim=None, mult=2, norm=True, groups=1):
-        super().__init__()
+#     def __init__(self, dim, dim_out, *, emb_dim=None, mult=2, norm=True, groups=1):
+#         super().__init__()
         
-        self.mlp = (
-            nn.Sequential(
-                nn.SiLU(),
-                nn.Linear(emb_dim, dim),
-            )
-            if exists(emb_dim)
-            else None
-        )
+#         self.mlp = (
+#             nn.Sequential(
+#                 nn.SiLU(),
+#                 nn.Linear(emb_dim, dim),
+#             )
+#             if exists(emb_dim)
+#             else None
+#         )
 
-        self.ds_conv = nn.Conv1d(dim, dim, 7, padding=3, groups=dim, padding_mode='reflect')
+#         self.ds_conv = nn.Conv1d(dim, dim, 7, padding=3, groups=dim, padding_mode='reflect')
 
-        self.net = nn.Sequential(
-            nn.GroupNorm(1, dim) if norm else nn.Identity(),
-            nn.Conv1d(dim, dim_out * mult, 7,1,3, padding_mode='reflect', groups=groups),
-            nn.SiLU(),
+#         self.net = nn.Sequential(
+#             nn.GroupNorm(1, dim) if norm else nn.Identity(),
+#             nn.Conv1d(dim, dim_out * mult, 7,1,3, padding_mode='reflect', groups=groups),
+#             nn.SiLU(),
 
-            nn.GroupNorm(1, dim_out * mult),
-            nn.Conv1d(dim_out * mult, dim_out, 7,1,3, padding_mode='reflect', groups=groups),
-        )
+#             nn.GroupNorm(1, dim_out * mult),
+#             nn.Conv1d(dim_out * mult, dim_out, 7,1,3, padding_mode='reflect', groups=groups),
+#         )
 
-        self.res_conv = nn.Conv1d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
+#         self.res_conv = nn.Conv1d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
 
-    def forward(self, x: "N,C,L", time_emb: "N,T" = None) -> "N,D,L":
-        h: "N,C,L" = self.ds_conv(x)
+#     def forward(self, x: "N,C,L", time_emb: "N,T" = None) -> "N,D,L":
+#         h: "N,C,L" = self.ds_conv(x)
 
-        if exists(self.mlp) and exists(time_emb):
-            condition: "N,C" = self.mlp(time_emb)
-            h = h + condition.unsqueeze(-1)
+#         if exists(self.mlp) and exists(time_emb):
+#             condition: "N,C" = self.mlp(time_emb)
+#             h = h + condition.unsqueeze(-1)
 
-        h: "N,D,L" = self.net(h)
-        return h + self.res_conv(x)
+#         h: "N,D,L" = self.net(h)
+#         return h + self.res_conv(x)
 
 class ConvNextBlock(layers.Layer):
     """https://arxiv.org/abs/2201.03545"""
@@ -263,10 +266,9 @@ class ConvNextBlock(layers.Layer):
         
         h = self.net(h)
         return h + self.res_conv(inputs)
-    
-class UNet(nn.Module):
-    def __init__(
-        self,
+
+class UNet(layers.Layer):
+    def __init__(self,
         in_dim,
         out_dim,
         h_dims,
@@ -276,8 +278,78 @@ class UNet(nn.Module):
         wave_num_stacks,
         blocks_per_depth,
         attn_heads,
-        attn_dim,
+        attn_dim
     ):
+        super().__init__()
+
+        block = partial(ConvNextBlock, mult=convnext_mult, groups=h_dim_groups)
+
+        in_out = list(zip(h_dims[:-1], h_dims[1:]))
+
+        num_layers = len(in_out)
+
+        self.init_conv = tf.keras.Sequential([
+            layers.ZeroPadding1D(3),
+            layers.Conv1D(h_dims[0], 7, padding="valid"),
+            WaveBlock(h_dims[0], wave_stack_depth, wave_num_stacks)
+        ])
+
+        emb_dim = h_dims[0] * 4
+        self.time_mlp = tf.keras.Sequential({
+            SinusoidalPositionEmbeddings(h_dims[0]),
+            layers.Dense(emb_dim),
+            layers.Lambda(tf.nn.silu),
+            layers.Dense(emb_dim)
+        })
+
+        self.downs = [
+            [
+                [
+                    block(dim_in if i == 0 else dim_out, dim_out, emb_dim=emb_dim)
+                    for i in range(blocks_per_depth)
+                ],
+                [
+                    Residual(PreNorm(dim_out, LinearAttention(dim_out, heads=attn_heads, dim_head=attn_dim)))
+                    for _ in range(blocks_per_depth)
+                ],
+                Downsample(dim_out) if ind < (num_layers - 1) else layers.Identity(),
+            ]
+            for ind, (dim_in, dim_out) in enumerate(in_out)
+        ]
+
+        mid_dim = h_dims[-1]
+        self.mid_block1 = block(mid_dim, mid_dim, emb_dim=emb_dim)
+        self.mid_attn = Residual(PreNorm(mid_dim, Attention(mid_dim, heads=attn_heads, dim_head=attn_dim)))
+        self.mid_block2 = block(mid_dim, mid_dim, emb_dim=emb_dim)
+
+        self.ups = [
+            [
+                [
+                    block(dim_out * 2 if i == 0 else dim_in, dim_in, emb_dim=emb_dim)
+                    for i in range(blocks_per_depth)
+                ],
+                [
+                    Residual(PreNorm(dim_in, LinearAttention(dim_in, heads=attn_heads, dim_head=attn_dim)))
+                    for _ in range(blocks_per_depth)
+                ],
+                Upsample(dim_in) if ind < (num_layers - 1) else layers.Identity()
+            ]
+            for ind, (dim_in, dim_out) in enumerate(in_out[::-1])
+        ]
+
+        self.final_conv = tf.keras.Sequential([
+            *(
+                block(h_dims[0], h_dims[0])
+                for _ in range(blocks_per_depth)
+            ),
+            zero_module(layers.Conv1D(h_dims[0], out_dim, 1))
+        ])
+
+        # All code below here is not part of the keras implementation
+
+    
+class UNet(nn.Module):
+    def __init__(self,in_dim,out_dim,h_dims,h_dim_groups,convnext_mult,wave_stack_depth,wave_num_stacks,blocks_per_depth,attn_heads,attn_dim):
         super().__init__()
         
         block = partial(ConvNextBlock, mult=convnext_mult, groups=h_dim_groups)
